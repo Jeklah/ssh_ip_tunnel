@@ -1,8 +1,16 @@
 [package]
 name = "ssh_ip_tunnel"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 anyhow = "1.0.99"
-clap = {version = "4.0.45", features = ["derive"]}
+clap = { version = "4.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+dirs = "5.0"
+backoff = { version = "0.4", features = ["futures", "tokio"] }
