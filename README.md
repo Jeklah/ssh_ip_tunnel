@@ -1,4 +1,4 @@
-# SSH IP Tunnel v2.0
+# SSH IP Tunnel v2.1
 
 A high-performance CLI tool to create SSH tunnels to ARM CPUs and transfer SSH keys automatically. Built with modern Rust for speed, reliability, and safety. This tool automatically validates CPU architecture to ensure SSH keys are deployed only to ARM-based systems, preventing accidental deployment to x86 systems in mixed-architecture environments.
 
