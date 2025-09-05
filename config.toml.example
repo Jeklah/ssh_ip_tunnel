@@ -1,0 +1,29 @@
+# SSH IP Tunnel Configuration File
+# Copy this file to ~/.config/ssh_ip_tunnel/config.toml to use
+
+# Default SSH key path to use when none is specified
+default_key_path = "~/.ssh/id_rsa.pub"
+
+# Default local port for SSH tunnels
+default_port = 2222
+
+# Timeout in seconds to wait for tunnel establishment
+tunnel_timeout_secs = 30
+
+# Maximum number of retry attempts for tunnel creation
+max_retries = 3
+
+# Example of host-specific configurations (future feature)
+# [[hosts]]
+# name = "raspberry-pi"
+# host = "192.168.1.42"
+# user = "pi"
+# port = 2223
+# key_path = "~/.ssh/pi_key.pub"
+
+# [[hosts]]
+# name = "ubuntu-server"
+# host = "10.0.0.100"
+# user = "ubuntu"
+# port = 2224
+# key_path = "~/.ssh/server_key.pub"
