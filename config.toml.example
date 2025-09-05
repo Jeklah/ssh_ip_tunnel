@@ -13,6 +13,10 @@ tunnel_timeout_secs = 30
 # Maximum number of retry attempts for tunnel creation
 max_retries = 3
 
+# Skip ARM architecture validation (use with caution)
+# Set to true to allow deployment to non-ARM systems
+skip_arch_validation = false
+
 # Example of host-specific configurations (future feature)
 # [[hosts]]
 # name = "raspberry-pi"
