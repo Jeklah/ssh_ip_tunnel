@@ -1,6 +1,6 @@
 # SSH IP Tunnel v2.0
 
-A high-performance CLI tool to create SSH tunnels to ARM CPUs and transfer SSH keys automatically. Built with modern Rust for speed, reliability, and safety. This tool simplifies the process of setting up SSH tunnels and deploying SSH keys to remote ARM devices with enterprise-grade features.
+A high-performance CLI tool to create SSH tunnels to ARM CPUs and transfer SSH keys automatically. Built with modern Rust for speed, reliability, and safety. This tool automatically validates CPU architecture to ensure SSH keys are deployed only to ARM-based systems, preventing accidental deployment to x86 systems in mixed-architecture environments.
 
 ## ✨ Features
 
@@ -8,6 +8,7 @@ A high-performance CLI tool to create SSH tunnels to ARM CPUs and transfer SSH k
 - **SSH Tunnel Creation**: Establishes secure SSH tunnels with local port forwarding
 - **Automatic Key Transfer**: Deploys SSH public keys using `ssh-copy-id`
 - **Connection Validation**: Actively tests tunnel connectivity before proceeding
+- **ARM Architecture Detection**: Automatically validates target CPU is ARM-based
 - **Flexible Configuration**: Support for custom ports, keys, and SSH options
 
 ### **Advanced Features**
@@ -17,6 +18,7 @@ A high-performance CLI tool to create SSH tunnels to ARM CPUs and transfer SSH k
 - **Configuration Files**: TOML-based configuration with intelligent defaults
 - **Path Validation**: Secure handling of SSH key paths with expansion
 - **Error Handling**: Comprehensive error types with detailed diagnostic context
+- **Architecture Safety**: Prevents accidental deployment to x86 systems
 - **Cross-platform**: Tested on Linux, macOS, and Windows
 
 ### **Enterprise Ready**
@@ -67,6 +69,7 @@ ssh_ip_tunnel --host <ARM_IP> --user <USERNAME> [OPTIONS]
 
 #### **Feature Flags**
 - `--no-key-transfer` - Create tunnel only, skip SSH key deployment
+- `--skip-arch-validation` - Skip ARM architecture validation (use with caution)
 - `-v, --verbose` - Enable detailed logging output for debugging
 
 #### **Configuration**
@@ -94,6 +97,9 @@ ssh_ip_tunnel --host 192.168.1.42 --user pi --verbose
 # Using custom configuration file
 ssh_ip_tunnel --host 192.168.1.42 --user pi --config /path/to/config.toml
 
+# Override architecture validation (for x86 systems)
+ssh_ip_tunnel --host 192.168.1.100 --user ubuntu --skip-arch-validation
+
 # Short form with all options
 ssh_ip_tunnel -H 10.0.0.50 -u root -k ~/.ssh/id_ed25519.pub -p 2200 -v
 ```
@@ -104,8 +110,10 @@ ssh_ip_tunnel -H 10.0.0.50 -u root -k ~/.ssh/id_ed25519.pub -p 2200 -v
 2. **Path Validation**: Validates and expands SSH key paths (handles `~` notation)
 3. **SSH Tunnel Creation**: Establishes tunnel using secure SSH options with exponential backoff retry
 4. **Connection Validation**: Actively tests tunnel connectivity before proceeding (replaces fixed delays)
-5. **Key Transfer**: Transfers SSH public key through the validated tunnel using `ssh-copy-id`
-6. **Error Handling**: Provides comprehensive error diagnostics with structured logging
+5. **Architecture Detection**: Automatically detects CPU architecture using `uname -m` command
+6. **ARM Validation**: Verifies target system is ARM-based before key deployment
+7. **Key Transfer**: Transfers SSH public key through the validated tunnel using `ssh-copy-id`
+8. **Error Handling**: Provides comprehensive error diagnostics with structured logging
 
 ### **Technical Flow**
 - **Async Runtime**: All operations run on Tokio async runtime for non-blocking I/O
@@ -136,6 +144,10 @@ tunnel_timeout_secs = 30
 
 # Maximum number of retry attempts for tunnel creation
 max_retries = 3
+
+# Skip ARM architecture validation (use with caution)
+# Set to true to allow deployment to non-ARM systems
+skip_arch_validation = false
 ```
 
 ### **Configuration Schema**
@@ -145,6 +157,7 @@ max_retries = 3
 | `default_port` | Integer | `2222` | Default local tunnel port |
 | `tunnel_timeout_secs` | Integer | `30` | Tunnel establishment timeout |
 | `max_retries` | Integer | `3` | Maximum retry attempts |
+| `skip_arch_validation` | Boolean | `false` | Skip ARM architecture validation |
 
 ### **Example Configuration**
 Copy `config.toml.example` to your config directory:
@@ -340,6 +353,24 @@ pub struct Config {
 - Verify file permissions are readable
 - Generate key if missing: `ssh-keygen -t rsa`
 
+#### **6. Non-ARM CPU Detected**
+**Error**: `Non-ARM CPU detected: <architecture>. This tool is designed for ARM CPUs only`
+
+**Solutions**:
+- Verify you're connecting to the correct ARM device
+- Check if you have multiple systems and connected to wrong one
+- Use `--skip-arch-validation` flag to override (use with caution)
+- Manually verify architecture: `ssh user@host uname -m`
+
+#### **7. Architecture Detection Failed**
+**Error**: `Architecture detection failed: <details>`
+
+**Solutions**:
+- Ensure `uname` command is available on target system
+- Check SSH connectivity and permissions
+- Verify target system is responsive
+- Use `--skip-arch-validation` to bypass detection
+
 ### **Debugging Tools**
 
 #### **Verbose Logging**
@@ -358,6 +389,9 @@ ssh_ip_tunnel --config ./debug.toml --host 192.168.1.42 --user pi
 
 # Skip key transfer for tunnel testing
 ssh_ip_tunnel --host 192.168.1.42 --user pi --no-key-transfer
+
+# Skip architecture validation for x86 systems
+ssh_ip_tunnel --host 192.168.1.100 --user ubuntu --skip-arch-validation
 ```
 
 #### **Manual Validation**
@@ -382,6 +416,9 @@ INFO  SSH tunnel created successfully
 INFO  Validating tunnel connectivity...
 WARN  Tunnel validation attempt failed, retrying...
 INFO  Tunnel validation successful
+INFO  Detecting CPU architecture...
+INFO  Detected architecture: aarch64
+INFO  Confirmed ARM architecture: aarch64
 INFO  Transferring SSH key: "/home/user/.ssh/id_rsa.pub"
 INFO  SSH key transferred successfully
 ```

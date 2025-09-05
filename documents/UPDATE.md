@@ -8,6 +8,7 @@ This document outlines the major improvements and optimizations made to the SSH 
 
 - **v1.0**: Basic synchronous implementation with simple error handling
 - **v2.0**: Complete rewrite with async operations, advanced error handling, and enterprise features
+- **v2.1**: Added ARM architecture validation to prevent accidental deployment to x86 systems
 
 ---
 
@@ -198,6 +199,59 @@ max_retries = 3
 - Easier deployment and management
 - Reduced command-line verbosity
 
+### 8. ARM Architecture Validation
+
+**Before:**
+- No architecture detection or validation
+- Possible to deploy SSH keys to x86 systems by mistake
+- No safeguards in mixed-architecture environments
+
+**After:**
+- Automatic CPU architecture detection using `uname -m`
+- ARM-specific validation before key deployment
+- Configurable override for special cases
+- Clear error messages for non-ARM systems
+
+```rust
+pub async fn detect_architecture(&self, user: &str, port: u16) -> Result<String, TunnelError> {
+    let output = timeout(
+        Duration::from_secs(10),
+        Command::new("ssh")
+            .args([
+                "-p", &port.to_string(),
+                &format!("{}@localhost", user),
+                "uname -m",
+            ])
+            .output(),
+    ).await;
+    
+    // Process architecture detection...
+}
+
+pub async fn validate_arm_architecture(&self, user: &str, port: u16) -> Result<(), TunnelError> {
+    let arch = self.detect_architecture(user, port).await?;
+    
+    let is_arm = arch.starts_with("arm")
+        || arch.starts_with("aarch64")
+        || arch.starts_with("armv")
+        || arch.contains("arm");
+    
+    if !is_arm {
+        return Err(TunnelError::NonArmCpu(format!(
+            "Detected architecture '{}' is not ARM-based", arch
+        )));
+    }
+    
+    Ok(())
+}
+```
+
+**Benefits:**
+- Prevents accidental deployment to wrong architecture
+- Critical safety feature for mixed-architecture environments
+- Clear identification of target CPU architecture
+- Configurable override for advanced users
+
 ### 7. Enhanced Security Features
 
 **Before:**
@@ -287,6 +341,16 @@ struct Cli {
 - Better help documentation
 - Feature discoverability
 
+**New CLI Options:**
+```bash
+# Skip architecture validation (use with caution)
+--skip-arch-validation
+
+# Example usage for mixed environments
+ssh_ip_tunnel --host 192.168.1.42 --user pi --verbose
+ssh_ip_tunnel --host 192.168.1.100 --user ubuntu --skip-arch-validation
+```
+
 ---
 
 ## 📦 New Dependencies
@@ -304,6 +368,8 @@ The improved version introduces several high-quality Rust crates:
 | `dirs` | Directory utilities | Cross-platform path handling |
 | `backoff` | Retry logic | Resilient network operations |
 
+**No new dependencies were added for ARM validation** - this feature uses existing SSH connectivity and standard Unix commands.
+
 ---
 
 ## 🏗️ Architecture Improvements
@@ -319,7 +385,15 @@ The improved version introduces several high-quality Rust crates:
 struct Config { /* ... */ }
 
 // Error handling
-enum TunnelError { /* ... */ }
+enum TunnelError { 
+    TunnelCreation(String),
+    KeyTransfer(String),
+    ConnectionValidation(String),
+    TunnelTimeout,
+    InvalidKeyPath(PathBuf),
+    ArchitectureDetection(String),
+    NonArmCpu(String),  // New: ARM validation errors
+}
 
 // Core functionality
 struct SSHTunnelManager {
@@ -329,6 +403,8 @@ struct SSHTunnelManager {
 impl SSHTunnelManager {
     pub async fn create_tunnel(&self, ...) -> Result<(), TunnelError>
     pub async fn validate_tunnel(&self, ...) -> Result<(), TunnelError>
+    pub async fn detect_architecture(&self, ...) -> Result<String, TunnelError>  // New
+    pub async fn validate_arm_architecture(&self, ...) -> Result<(), TunnelError>  // New
     pub async fn transfer_key(&self, ...) -> Result<(), TunnelError>
     pub async fn run(&self, ...) -> Result<()>
 }
@@ -381,6 +457,7 @@ mod tests {
 3. **Retry Logic**: Reduces failed operations requiring manual restart
 4. **Structured Logging**: Minimal performance overhead
 5. **Configuration Caching**: Reduces repeated file system operations
+6. **Architecture Validation**: Prevents costly deployment mistakes early
 
 ---
 
@@ -429,17 +506,20 @@ The new architecture enables several future enhancements:
 5. **Plugin System**: Extensible functionality
 6. **GUI Interface**: Desktop application wrapper
 7. **REST API**: HTTP interface for automation
+8. **Multi-Architecture Support**: Configurable architecture targets beyond ARM
+9. **Architecture-Specific Key Management**: Different keys for different architectures
 
 ---
 
 ## 🏆 Summary
 
-This update transforms the SSH IP Tunnel tool from a simple script into a robust, enterprise-ready application. The improvements provide:
+This update (v2.1) adds critical architecture validation to the already robust SSH IP Tunnel tool. Combined with the v2.0 improvements, the tool now provides:
 
-- **Reliability**: Retry logic and connection validation
+- **Reliability**: Retry logic, connection validation, and architecture safety
 - **Performance**: Async operations and intelligent timing
-- **Usability**: Better errors, logging, and configuration
+- **Usability**: Better errors, logging, configuration, and architecture awareness
+- **Safety**: ARM validation prevents deployment to wrong systems
 - **Maintainability**: Clean architecture and comprehensive testing
-- **Extensibility**: Foundation for future enhancements
+- **Extensibility**: Foundation for future multi-architecture enhancements
 
 The tool now represents best practices in modern Rust development while maintaining the simple, effective CLI interface that users expect.
