@@ -25,6 +25,10 @@ pub enum TunnelError {
     TunnelTimeout,
     #[error("Invalid SSH key path: {0}")]
     InvalidKeyPath(PathBuf),
+    #[error("Architecture detection failed: {0}")]
+    ArchitectureDetection(String),
+    #[error("Non-ARM CPU detected: {0}. This tool is designed for ARM CPUs only")]
+    NonArmCpu(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,6 +37,7 @@ pub struct Config {
     pub default_port: u16,
     pub tunnel_timeout_secs: u64,
     pub max_retries: u32,
+    pub skip_arch_validation: bool,
 }
 
 impl Default for Config {
@@ -42,6 +47,7 @@ impl Default for Config {
             default_port: 2222,
             tunnel_timeout_secs: 30,
             max_retries: 3,
+            skip_arch_validation: false,
         }
     }
 }
@@ -78,6 +84,10 @@ struct Cli {
     /// Configuration file path
     #[arg(long)]
     config: Option<PathBuf>,
+
+    /// Skip ARM architecture validation (use with caution)
+    #[arg(long)]
+    skip_arch_validation: bool,
 }
 
 pub struct SSHTunnelManager {
@@ -162,6 +172,84 @@ impl SSHTunnelManager {
         backoff::future::retry(backoff_strategy, operation).await?;
 
         info!("SSH tunnel created successfully");
+        Ok(())
+    }
+
+    /// Detects the CPU architecture of the remote system
+    pub async fn detect_architecture(&self, user: &str, port: u16) -> Result<String, TunnelError> {
+        info!("Detecting CPU architecture...");
+
+        let output = timeout(
+            Duration::from_secs(10),
+            Command::new("ssh")
+                .args([
+                    "-p",
+                    &port.to_string(),
+                    &format!("{}@localhost", user),
+                    "-o",
+                    "ConnectTimeout=5",
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "LogLevel=ERROR",
+                    "uname -m",
+                ])
+                .output(),
+        )
+        .await;
+
+        match output {
+            Ok(Ok(output)) if output.status.success() => {
+                let arch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                info!("Detected architecture: {}", arch);
+                Ok(arch)
+            }
+            Ok(Ok(output)) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(TunnelError::ArchitectureDetection(format!(
+                    "Failed to detect architecture: {}",
+                    stderr
+                )))
+            }
+            Ok(Err(e)) => Err(TunnelError::ArchitectureDetection(format!(
+                "Failed to execute architecture detection: {}",
+                e
+            ))),
+            Err(_) => Err(TunnelError::ArchitectureDetection(
+                "Timeout while detecting architecture".to_string(),
+            )),
+        }
+    }
+
+    /// Validates that the target system has an ARM CPU
+    pub async fn validate_arm_architecture(
+        &self,
+        user: &str,
+        port: u16,
+    ) -> Result<(), TunnelError> {
+        if self.config.skip_arch_validation {
+            warn!("Skipping ARM architecture validation as requested");
+            return Ok(());
+        }
+
+        let arch = self.detect_architecture(user, port).await?;
+
+        // Check for ARM architecture patterns
+        let is_arm = arch.starts_with("arm")
+            || arch.starts_with("aarch64")
+            || arch.starts_with("armv")
+            || arch.contains("arm");
+
+        if !is_arm {
+            return Err(TunnelError::NonArmCpu(format!(
+                "Detected architecture '{}' is not ARM-based. Use --skip-arch-validation to override",
+                arch
+            )));
+        }
+
+        info!("Confirmed ARM architecture: {}", arch);
         Ok(())
     }
 
@@ -266,6 +354,9 @@ impl SSHTunnelManager {
         // Validate tunnel
         self.validate_tunnel(user, port).await?;
 
+        // Validate ARM architecture before key transfer
+        self.validate_arm_architecture(user, port).await?;
+
         // Transfer key if requested
         if !skip_key_transfer {
             self.transfer_key(key_path, user, port).await?;
@@ -329,7 +420,13 @@ async fn main() -> Result<()> {
     let key_path = cli.key.unwrap_or(config.default_key_path.clone());
     let port = cli.port.unwrap_or(config.default_port);
 
-    let tunnel_manager = SSHTunnelManager::new(config);
+    // Override config with CLI flags
+    let mut final_config = config;
+    if cli.skip_arch_validation {
+        final_config.skip_arch_validation = true;
+    }
+
+    let tunnel_manager = SSHTunnelManager::new(final_config);
 
     tunnel_manager
         .run(&cli.host, &cli.user, &key_path, port, cli.no_key_transfer)
@@ -351,6 +448,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.default_port, 2222);
         assert_eq!(config.default_key_path, "~/.ssh/id_rsa.pub");
+        assert_eq!(config.skip_arch_validation, false);
     }
 
     #[tokio::test]
@@ -361,5 +459,46 @@ mod tests {
         // Test invalid path
         let result = manager.validate_key_path("/nonexistent/key.pub");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_arm_architecture_patterns() {
+        // Test various ARM architecture strings that should be recognized
+        let arm_architectures = vec!["armv7l", "armv6l", "aarch64", "arm64", "armv8l", "armhf"];
+
+        for arch in arm_architectures {
+            let is_arm = arch.starts_with("arm")
+                || arch.starts_with("aarch64")
+                || arch.starts_with("armv")
+                || arch.contains("arm");
+            assert!(is_arm, "Architecture '{}' should be detected as ARM", arch);
+        }
+    }
+
+    #[test]
+    fn test_non_arm_architecture_patterns() {
+        // Test various non-ARM architecture strings that should be rejected
+        let non_arm_architectures = vec!["x86_64", "i686", "i386", "s390x", "ppc64le", "mips64"];
+
+        for arch in non_arm_architectures {
+            let is_arm = arch.starts_with("arm")
+                || arch.starts_with("aarch64")
+                || arch.starts_with("armv")
+                || arch.contains("arm");
+            assert!(
+                !is_arm,
+                "Architecture '{}' should NOT be detected as ARM",
+                arch
+            );
+        }
+    }
+
+    #[test]
+    fn test_config_with_skip_validation() {
+        let mut config = Config::default();
+        config.skip_arch_validation = true;
+
+        let manager = SSHTunnelManager::new(config);
+        assert!(manager.config.skip_arch_validation);
     }
 }
